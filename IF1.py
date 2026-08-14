@@ -1,242 +1,354 @@
-import os
+import streamlit as st
+import pandas as pd
+from datetime import datetime
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
-from datetime import datetime
-from io import BytesIO
-import pandas as pd
-import streamlit as st
+import io
+import re
 
-# ---------- Page Configuration ----------
+# ──────────────────────────────────────────────
+# Page Configuration
+# ──────────────────────────────────────────────
 st.set_page_config(
-    page_title="GBV - Product Inquiry",
-    page_icon="🧪",
-    layout="centered",
+    page_title="Product Inquiry Form",
+    page_icon="📋",
+    layout="centered"
 )
 
-# ---------- Custom CSS for Beautification ----------
-st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+st.title("📋 Product Inquiry Form")
+st.markdown("Please fill in **all** fields below. Every field is **mandatory**.")
+st.markdown("---")
 
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
-    }
-    .stApp {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    }
+# ──────────────────────────────────────────────
+# Helper Functions
+# ──────────────────────────────────────────────
 
-    h1 {
-        font-weight: 700 !important;
-        color: #1f3a5f !important;
-        text-align: center;
-        margin-bottom: 10px !important;
-    }
-    .subheader {
-        text-align: center;
-        color: #5c6b7c;
-        font-size: 18px;
-        margin-bottom: 30px;
-    }
+def validate_email(email: str) -> bool:
+    """Validate email format using regex."""
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
 
-    /* Form Card Styling */
-    .stForm {
-        background: rgba(255, 255, 255, 0.9) !important;
-        backdrop-filter: blur(10px);
-        border-radius: 20px !important;
-        padding: 40px !important;
-        border: 1px solid rgba(255, 255, 255, 0.5) !important;
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1) !important;
-    }
 
-    /* Input Fields */
-    .stTextInput > div > div > input, 
-    .stTextArea > div > div > textarea, 
-    .stSelectbox > div > div > div {
-        border-radius: 10px !important;
-        border: 1px solid #e0e5ec !important;
-        padding: 12px !important;
-        background-color: #f9fafc !important;
-        transition: all 0.3s ease;
-    }
-    .stTextInput > div > div > input:focus, 
-    .stTextArea > div > div > textarea:focus {
-        border-color: #1f3a5f !important;
-        box-shadow: 0 0 0 3px rgba(31, 58, 95, 0.1) !important;
-    }
-    
-    /* Labels */
-    .st-emotion-cache-1ueww6k, .st-emotion-cache-16txtl3 {
-        font-weight: 600 !important;
-        color: #2c3e50 !important;
-        margin-bottom: 8px !important;
-    }
+def validate_phone(phone: str) -> bool:
+    """Basic phone validation — allows digits, spaces, +, -, ()."""
+    phone = phone.strip()
+    if len(phone) < 7 or len(phone) > 20:
+        return False
+    pattern = r'^[\d\s\+\-\(\)]+$'
+    return re.match(pattern, phone) is not None
 
-    /* Submit Button */
-    .stButton > button {
-        background: linear-gradient(90deg, #1f3a5f 0%, #2c5278 100%) !important;
-        color: white !important;
-        border-radius: 12px !important;
-        height: 55px !important;
-        font-size: 18px !important;
-        font-weight: 600 !important;
-        width: 100% !important;
-        border: none !important;
-        box-shadow: 0 4px 15px rgba(31, 58, 95, 0.3) !important;
-        transition: all 0.3s ease !important;
-    }
-    .stButton > button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 20px rgba(31, 58, 95, 0.4) !important;
-    }
-    
-    /* Alerts */
-    .stAlert {
-        border-radius: 12px !important;
-        font-weight: 500 !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
 
-# ---------- Retrieve Owner's Secrets ----------
-# These are fetched securely from Replit Secrets
-SENDER_EMAIL = os.getenv("SENDER_EMAIL")
-SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
-RECEIVER_EMAIL = os.getenv("RECEIVER_EMAIL") # xyz@bvg.com is stored here
-SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+def create_excel(data_dict: dict) -> io.BytesIO:
+    """
+    Create a styled Excel file from the data dictionary.
+    Returns a BytesIO buffer positioned at 0.
+    """
+    column_order = [
+        "Timestamp", "Name", "Email", "Phone",
+        "Product", "CAS", "Quantity", "UOM",
+        "Packing", "Lead Time", "Other Requirements"
+    ]
+    df = pd.DataFrame([data_dict], columns=column_order)
 
-# Safety check to ensure owner configured secrets properly
-if not all([SENDER_EMAIL, SENDER_PASSWORD, RECEIVER_EMAIL]):
-    st.error("⚠️ **Configuration Error:** The app owner has not set email credentials in Replit Secrets.")
-    st.stop()
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Inquiry', index=False)
 
-# ---------- UI Layout ----------
-st.markdown("<h1>🧪 Product Inquiry Form</h1>", unsafe_allow_html=True)
-st.markdown("<div class='subheader'>Please fill in all details below. <b>All fields are strictly mandatory.</b></div>", unsafe_allow_html=True)
+        # Auto-adjust column widths
+        worksheet = writer.sheets['Inquiry']
+        for idx, column in enumerate(worksheet.columns, 1):
+            max_length = max(
+                (len(str(cell.value)) for cell in column),
+                default=10
+            )
+            worksheet.column_dimensions[
+                column[0].column_letter
+            ].width = max(max_length + 4, 14)
+
+        # Bold header row
+        from openpyxl.styles import Font
+        for cell in worksheet[1]:
+            cell.font = Font(bold=True)
+
+    buffer.seek(0)
+    return buffer
+
+
+def send_email_with_excel(
+    sender_email: str,
+    sender_password: str,
+    recipient_email: str,
+    smtp_server: str,
+    smtp_port: int,
+    subject: str,
+    body: str,
+    excel_buffer: io.BytesIO,
+    filename: str
+):
+    """Send an email with an Excel attachment via SMTP."""
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = recipient_email
+    msg['Subject'] = subject
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    # Attach the Excel file
+    part = MIMEBase(
+        'application',
+        'vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    part.set_payload(excel_buffer.read())
+    encoders.encode_base64(part)
+    part.add_header(
+        'Content-Disposition',
+        f'attachment; filename="{filename}"'
+    )
+    msg.attach(part)
+
+    # Connect and send
+    if smtp_port == 465:
+        server = smtplib.SMTP_SSL(smtp_server, smtp_port)
+    else:
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+
+    server.login(sender_email, sender_password)
+    server.send_message(msg)
+    server.quit()
+
+
+# ──────────────────────────────────────────────
+# Form UI
+# ──────────────────────────────────────────────
 
 with st.form("inquiry_form", clear_on_submit=False):
-    
-    st.markdown("#### 👤 Contact Details")
+
+    st.subheader("👤 Contact Information")
     col1, col2 = st.columns(2)
+
     with col1:
-        name = st.text_input("Full Name *")
+        name = st.text_input(
+            "Name *",
+            placeholder="Enter your full name"
+        )
+        email = st.text_input(
+            "Email *",
+            placeholder="you@example.com"
+        )
+        phone = st.text_input(
+            "Phone *",
+            placeholder="+91 98765 43210"
+        )
+
     with col2:
-        # THIS is where the END USER enters their email
-        user_email = st.text_input("Your Email ID *")
+        product = st.text_input(
+            "Product *",
+            placeholder="Product name"
+        )
+        cas = st.text_input(
+            "CAS Number *",
+            placeholder="e.g., 64-17-5"
+        )
+        quantity = st.number_input(
+            "Quantity *",
+            min_value=0.0,
+            step=0.1,
+            format="%.2f"
+        )
 
-    phone = st.text_input("Phone Number *")
+    uom = st.selectbox(
+        "UOM (Unit of Measure) *",
+        ["Kg", "gm", "litre", "MT", "kilolitre"]
+    )
 
-    st.markdown("#### 📦 Product Details")
+    st.subheader("📦 Additional Details")
     col3, col4 = st.columns(2)
+
     with col3:
-        product = st.text_input("Product Name *")
+        packing = st.text_input(
+            "Packing *",
+            placeholder="e.g., 25 Kg drum"
+        )
+
     with col4:
-        cas_no = st.text_input("CAS NO. *")
-    
-    col5, col6 = st.columns(2)
-    with col5:
-        import_domestic = st.selectbox("For Import or Domestic *", ["", "Import", "Domestic"])
-    with col6:
-        req_type = st.selectbox("Firm Requirement or Budgetary *", ["", "Firm Requirement", "Budgetary"])
+        lead_time = st.text_input(
+            "Lead Time *",
+            placeholder="e.g., 7 days"
+        )
 
-    st.markdown("#### 📋 Order Specifics")
-    col7, col8 = st.columns(2)
-    with col7:
-        payment_terms = st.text_input("Expected Payment Terms *")
-    with col8:
-        timelines = st.text_input("Anticipated Timelines *")
+    other_req = st.text_area(
+        "Any Other Requirements *",
+        placeholder="Specify any additional requirements, specifications, etc.",
+        height=100
+    )
 
-    packing_req = st.text_input("Packing Requirement *")
-    comments = st.text_area("Comments / Additional Info *", height=120)
+    submitted = st.form_submit_button(
+        "Submit Inquiry",
+        type="primary",
+        use_container_width=True
+    )
 
-    submit_btn = st.form_submit_button("Submit Inquiry 🚀")
+# ──────────────────────────────────────────────
+# Form Validation & Processing
+# ──────────────────────────────────────────────
 
-# ---------- Validation & Processing ----------
-if submit_btn:
-    # 1. Strict Mandatory Validation
+if submitted:
     errors = []
-    if not name.strip(): errors.append("Full Name")
-    if not user_email.strip() or "@" not in user_email: errors.append("Valid Your Email ID")
-    if not phone.strip(): errors.append("Phone Number")
-    if not product.strip(): errors.append("Product Name")
-    if not cas_no.strip(): errors.append("CAS NO.")
-    if not import_domestic: errors.append("Import/Domestic selection")
-    if not req_type: errors.append("Requirement Type selection")
-    if not payment_terms.strip(): errors.append("Payment Terms")
-    if not timelines.strip(): errors.append("Anticipated Timelines")
-    if not packing_req.strip(): errors.append("Packing Requirement")
-    if not comments.strip(): errors.append("Comments")
 
+    # --- Mandatory field checks ---
+    if not name.strip():
+        errors.append("• **Name** is required.")
+    if not email.strip():
+        errors.append("• **Email** is required.")
+    elif not validate_email(email.strip()):
+        errors.append("• Please enter a **valid email address**.")
+    if not phone.strip():
+        errors.append("• **Phone** is required.")
+    elif not validate_phone(phone.strip()):
+        errors.append("• Please enter a **valid phone number**.")
+    if not product.strip():
+        errors.append("• **Product** is required.")
+    if not cas.strip():
+        errors.append("• **CAS number** is required.")
+    if quantity <= 0:
+        errors.append("• **Quantity** must be greater than 0.")
+    if not packing.strip():
+        errors.append("• **Packing** is required.")
+    if not lead_time.strip():
+        errors.append("• **Lead time** is required.")
+    if not other_req.strip():
+        errors.append("• **Other requirements** cannot be empty.")
+
+    # --- Show errors or process ---
     if errors:
-        st.error(f"⚠️ **Submission Blocked!** Please fill out the following mandatory field(s):\n\n- {', '.join(errors)}")
+        st.error("Please fix the following errors:")
+        for err in errors:
+            st.markdown(err)
     else:
+        # Build data dictionary
+        data_dict = {
+            "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Name": name.strip(),
+            "Email": email.strip(),
+            "Phone": phone.strip(),
+            "Product": product.strip(),
+            "CAS": cas.strip(),
+            "Quantity": quantity,
+            "UOM": uom,
+            "Packing": packing.strip(),
+            "Lead Time": lead_time.strip(),
+            "Other Requirements": other_req.strip()
+        }
+
         try:
-            # 2. Create DataFrame
-            inquiry_data = {
-                "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "Name": name.strip(),
-                "Email ID": user_email.strip(),
-                "Phone Number": phone.strip(),
-                "Product": product.strip(),
-                "CAS NO.": cas_no.strip(),
-                "Import/Domestic": import_domestic,
-                "Requirement Type": req_type,
-                "Payment Terms": payment_terms.strip(),
-                "Anticipated Timelines": timelines.strip(),
-                "Packing Requirement": packing_req.strip(),
-                "Comments": comments.strip()
-            }
-            df = pd.DataFrame([inquiry_data])
+            # ── Load secrets from Replit ──
+            sender_email    = st.secrets["EMAIL_ADDRESS"]
+            sender_password = st.secrets["EMAIL_PASSWORD"]
+            recipient_email = st.secrets.get("RECIPIENT_EMAIL", sender_email)
+            smtp_server     = st.secrets.get("SMTP_SERVER", "smtp.gmail.com")
+            smtp_port       = int(st.secrets.get("SMTP_PORT", 587))
 
-            # 3. Generate Excel file in memory (BytesIO) to attach to email
-            excel_buffer = BytesIO()
-            df.to_excel(excel_buffer, index=False, engine="openpyxl")
-            excel_buffer.seek(0)
+            # ── Create Excel attachment ──
+            excel_buffer = create_excel(data_dict)
+            safe_name = re.sub(r'[^a-zA-Z0-9_]', '', name.strip().replace(' ', '_'))
+            filename = f"inquiry_{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
-            # 4. Save to Master Excel locally on Replit
-            master_file = "inquiries_master.xlsx"
-            if os.path.exists(master_file):
-                existing_df = pd.read_excel(master_file, engine="openpyxl")
-                combined_df = pd.concat([existing_df, df], ignore_index=True)
-                combined_df.to_excel(master_file, index=False, engine="openpyxl")
-            else:
-                df.to_excel(master_file, index=False, engine="openpyxl")
+            # ── Compose email ──
+            subject = f"🧪 New Product Inquiry: {product.strip()} (CAS: {cas.strip()})"
 
-            # 5. Send Email to xyz@bvg.com
-            subject = f"New Product Inquiry – {product.strip()} ({cas_no.strip()})"
-            body = f"""
-Hello Team,
+            body = f"""\
+New product inquiry received via the online form.
 
-A new product inquiry has been submitted. Please find the details attached as an Excel file.
+═══════════════════════════════════════════
+  INQUIRY DETAILS
+═══════════════════════════════════════════
 
-Regards,
-Inquiry Bot
+  Name            : {data_dict['Name']}
+  Email           : {data_dict['Email']}
+  Phone           : {data_dict['Phone']}
+  Product         : {data_dict['Product']}
+  CAS Number      : {data_dict['CAS']}
+  Quantity        : {data_dict['Quantity']} {data_dict['UOM']}
+  Packing         : {data_dict['Packing']}
+  Lead Time       : {data_dict['Lead Time']}
+  Other Req.      : {data_dict['Other Requirements']}
+  Timestamp       : {data_dict['Timestamp']}
+
+═══════════════════════════════════════════
+
+An Excel sheet with the above details is attached.
 """
-            msg = MIMEMultipart()
-            msg["From"] = SENDER_EMAIL
-            msg["To"] = RECEIVER_EMAIL  # Goes to xyz@bvg.com
-            msg["Reply-To"] = user_email.strip() # If you hit reply, it goes to the end user!
-            msg["Subject"] = subject
-            msg.attach(MIMEText(body, "plain"))
 
-            # Attach the in-memory Excel file
-            part = MIMEBase("application", "octet-stream")
-            part.set_payload(excel_buffer.read())
-            encoders.encode_base64(part)
-            part.add_header("Content-Disposition", "attachment", filename="Inquiry_Details.xlsx")
-            msg.attach(part)
+            # ── Send email ──
+            with st.spinner("📤 Sending your inquiry..."):
+                send_email_with_excel(
+                    sender_email=sender_email,
+                    sender_password=sender_password,
+                    recipient_email=recipient_email,
+                    smtp_server=smtp_server,
+                    smtp_port=smtp_port,
+                    subject=subject,
+                    body=body,
+                    excel_buffer=excel_buffer,
+                    filename=filename
+                )
 
-            # Connect to SMTP and send
-            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-                server.starttls()
-                server.login(SENDER_EMAIL, SENDER_PASSWORD)
-                server.send_message(msg)
+            st.success(
+                "✅ Your inquiry has been submitted successfully! "
+                "An email with the Excel sheet has been sent."
+            )
 
-            st.success("✅ **Thank you!** Your inquiry has been successfully submitted and emailed to our team.")
-            st.balloons()
+            # Show submitted summary
+            with st.expander("📋 View Submitted Details"):
+                st.json(data_dict)
 
+        except KeyError as e:
+            st.error(
+                f"⚙️ Configuration error: Missing secret key `{str(e)}`. "
+                "Please configure all required secrets in Replit "
+                "(see setup instructions below)."
+            )
+        except smtplib.SMTPAuthenticationError:
+            st.error(
+                "🔐 Email authentication failed. If using Gmail, ensure you "
+                "are using an **App Password** (not your regular password) "
+                "and that 2-Step Verification is enabled."
+            )
         except Exception as e:
-            st.error(f"❌ **An error occurred while processing your request:** {str(e)}")
+            st.error(f"❌ An unexpected error occurred: `{str(e)}`")
+
+
+# ──────────────────────────────────────────────
+# Setup Instructions (collapsible)
+# ──────────────────────────────────────────────
+
+with st.expander("⚙️ Setup Instructions (for Administrators)"):
+    st.markdown("""
+### Replit Secrets Configuration
+
+Go to your Replit project → **Tools → Secrets** (or the 🔒 tab) and add:
+
+| Key | Value | Required |
+|-----|-------|----------|
+| `EMAIL_ADDRESS` | Sender Gmail address (e.g., `your_bot@gmail.com`) | ✅ |
+| `EMAIL_PASSWORD` | Gmail **App Password** (16 chars, not your login password) | ✅ |
+| `RECIPIENT_EMAIL` | Email where inquiries are delivered (defaults to `EMAIL_ADDRESS`) | Optional |
+| `SMTP_SERVER` | SMTP host (defaults to `smtp.gmail.com`) | Optional |
+| `SMTP_PORT` | Port number (defaults to `587`; use `465` for SSL) | Optional |
+
+### How to Generate a Gmail App Password
+
+1. Go to [Google Account Settings](https://myaccount.google.com/)
+2. Enable **2-Step Verification** (Security → 2-Step Verification)
+3. Navigate to **Security → App Passwords**
+4. Select app: **Mail**, device: **Other (Custom name)**
+5. Click **Generate** → copy the 16-character password
+6. Paste it as the `EMAIL_PASSWORD` secret in Replit
+
+### Required Packages
+
+Create a `requirements.txt` file:
