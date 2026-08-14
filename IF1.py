@@ -321,34 +321,3 @@ An Excel sheet with the above details is attached.
         except Exception as e:
             st.error(f"❌ An unexpected error occurred: `{str(e)}`")
 
-
-# ──────────────────────────────────────────────
-# Setup Instructions (collapsible)
-# ──────────────────────────────────────────────
-
-with st.expander("⚙️ Setup Instructions (for Administrators)"):
-    st.markdown("""
-### Replit Secrets Configuration
-
-Go to your Replit project → **Tools → Secrets** (or the 🔒 tab) and add:
-
-| Key | Value | Required |
-|-----|-------|----------|
-| `EMAIL_ADDRESS` | Sender Gmail address (e.g., `your_bot@gmail.com`) | ✅ |
-| `EMAIL_PASSWORD` | Gmail **App Password** (16 chars, not your login password) | ✅ |
-| `RECIPIENT_EMAIL` | Email where inquiries are delivered (defaults to `EMAIL_ADDRESS`) | Optional |
-| `SMTP_SERVER` | SMTP host (defaults to `smtp.gmail.com`) | Optional |
-| `SMTP_PORT` | Port number (defaults to `587`; use `465` for SSL) | Optional |
-
-### How to Generate a Gmail App Password
-
-1. Go to [Google Account Settings](https://myaccount.google.com/)
-2. Enable **2-Step Verification** (Security → 2-Step Verification)
-3. Navigate to **Security → App Passwords**
-4. Select app: **Mail**, device: **Other (Custom name)**
-5. Click **Generate** → copy the 16-character password
-6. Paste it as the `EMAIL_PASSWORD` secret in Replit
-
-### Required Packages
-
-Create a `requirements.txt` file:
